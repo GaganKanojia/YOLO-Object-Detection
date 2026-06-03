@@ -1,0 +1,80 @@
+# Fine-tuning config: backbone+neck strategy
+# Use when: head is heavily domain-specific, extreme nc change
+# Load: backbone + neck only
+# Reinit: entire Detect head (cv2 + cv3 + dfl)
+
+pretrained_weights : null             # REQUIRED: set to path of .pt file
+nc                 : null             # REQUIRED: set to your number of classes
+strategy           : backbone_neck
+
+# Dataset — fill in for your format
+# COCO format:
+# train_img_dir  : your/train/images
+# train_ann_file : your/train/annotations.json
+# val_img_dir    : your/val/images
+# val_ann_file   : your/val/annotations.json
+# YOLO format:
+# train_yaml     : your/data.yaml
+
+model    : configs/model/yolov11n.yaml
+epochs   : 50
+batch    : 8
+imgsz    : 640
+workers  : 4
+save_dir : runs/finetune
+
+# ── Differential learning rates ───────────────────────────
+# Higher head LRs since the entire head is fully random.
+use_differential_lr : true
+lr_backbone         : 0.00005  # very low — backbone is frozen conceptually
+lr_neck             : 0.0001
+lr_head_box         : 0.01     # high — fully random
+lr_head_cls_ft      : 0.01
+lr_head_cls_new     : 0.01
+
+# ── Fallback: single LR (used if use_differential_lr=false) ──
+lr0  : 0.001
+lrf  : 0.1
+
+# ── Optimizer ─────────────────────────────────────────────
+optimizer      : AdamW
+momentum       : 0.937
+weight_decay   : 0.0005
+warmup_epochs  : 2.0
+warmup_momentum: 0.8
+warmup_bias_lr : 0.1
+nbs            : 64
+
+# ── Backbone freezing ─────────────────────────────────────
+freeze_backbone        : true
+freeze_backbone_epochs : 10     # longer freeze for this strategy
+
+# ── Loss weights ──────────────────────────────────────────
+box : 7.5
+cls : 0.5
+dfl : 1.5
+
+# ── Augmentation — lighter for fine-tuning ────────────────
+mosaic       : 0.5
+close_mosaic : 10
+mixup        : 0.0
+cutmix       : 0.0
+copy_paste   : 0.0
+degrees      : 0.0
+translate    : 0.1
+scale        : 0.5
+shear        : 0.0
+perspective  : 0.0
+flipud       : 0.0
+fliplr       : 0.5
+hsv_h        : 0.015
+hsv_s        : 0.7
+hsv_v        : 0.4
+
+# ── Validation ────────────────────────────────────────────
+conf         : 0.001
+iou          : 0.7
+max_det      : 300
+patience     : 20
+amp          : true
+device       : ''

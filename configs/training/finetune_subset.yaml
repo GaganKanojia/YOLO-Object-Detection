@@ -1,0 +1,90 @@
+# Fine-tuning config: subset strategy
+# Use when: your classes are a STRICT SUBSET of the pretrained model's classes
+# AND you know the exact index mapping.
+# Example: fine-tuning a person+car detector from COCO80 pretrained weights.
+#
+# NOTE: the final cls Conv2d input width is c3 = max(ch[0], min(nc,100)). Row-copy is
+# exact only when c3_pretrained == c3_new (i.e. both nc values are on the same side of
+# ch[0], =64 for yolov11n). When c3 differs, only the overlapping input slice is copied
+# and a warning is logged; the cv3 intermediates are reinitialized regardless.
+
+pretrained_weights : null             # REQUIRED: set to path of .pt file
+nc                 : 2                 # example: person + car
+strategy           : subset
+# Map new class indices → pretrained class indices (COCO80 ordering)
+# person=0, bicycle=1, car=2, ... in COCO
+nc_subset_map      :
+  0: 0             # new class 0 (person) ← pretrained class 0 (person)
+  1: 2             # new class 1 (car)    ← pretrained class 2 (car)
+
+# Dataset — fill in for your format
+# COCO format:
+# train_img_dir  : your/train/images
+# train_ann_file : your/train/annotations.json
+# val_img_dir    : your/val/images
+# val_ann_file   : your/val/annotations.json
+# YOLO format:
+# train_yaml     : your/data.yaml
+
+model    : configs/model/yolov11n.yaml
+epochs   : 50
+batch    : 8
+imgsz    : 640
+workers  : 4
+save_dir : runs/finetune
+
+# ── Differential learning rates ───────────────────────────
+# Lower LRs since even the final cls layer is initialized from pretrained.
+use_differential_lr : true
+lr_backbone         : 0.00005
+lr_neck             : 0.0001
+lr_head_box         : 0.001
+lr_head_cls_ft      : 0.001
+lr_head_cls_new     : 0.005    # still higher but not from scratch
+
+# ── Fallback: single LR (used if use_differential_lr=false) ──
+lr0  : 0.001
+lrf  : 0.1
+
+# ── Optimizer ─────────────────────────────────────────────
+optimizer      : AdamW
+momentum       : 0.937
+weight_decay   : 0.0005
+warmup_epochs  : 2.0
+warmup_momentum: 0.8
+warmup_bias_lr : 0.1
+nbs            : 64
+
+# ── Backbone freezing ─────────────────────────────────────
+freeze_backbone        : true
+freeze_backbone_epochs : 5
+
+# ── Loss weights ──────────────────────────────────────────
+box : 7.5
+cls : 0.5
+dfl : 1.5
+
+# ── Augmentation — lighter for fine-tuning ────────────────
+mosaic       : 0.5
+close_mosaic : 10
+mixup        : 0.0
+cutmix       : 0.0
+copy_paste   : 0.0
+degrees      : 0.0
+translate    : 0.1
+scale        : 0.5
+shear        : 0.0
+perspective  : 0.0
+flipud       : 0.0
+fliplr       : 0.5
+hsv_h        : 0.015
+hsv_s        : 0.7
+hsv_v        : 0.4
+
+# ── Validation ────────────────────────────────────────────
+conf         : 0.001
+iou          : 0.7
+max_det      : 300
+patience     : 20
+amp          : true
+device       : ''

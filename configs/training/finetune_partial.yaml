@@ -1,0 +1,80 @@
+# Fine-tuning config: partial strategy (recommended)
+# Use when: fine-tuning on any custom dataset, any nc
+# Load: every shape-compatible layer (backbone + neck + cv2 + cv3 intermediates when c3 matches)
+# Reinit: shape-mismatched layers — always the final cls Conv2d, plus cv3 intermediates
+#         when c3 differs (c3 = max(ch[0], min(nc,100)); nc>ch[0] reshapes the whole cv3 branch)
+
+pretrained_weights : null             # REQUIRED: set to path of .pt file
+nc                 : null             # REQUIRED: set to your number of classes
+strategy           : partial          # weight loading strategy
+
+# Dataset — fill in for your format
+# COCO format:
+# train_img_dir  : your/train/images
+# train_ann_file : your/train/annotations.json
+# val_img_dir    : your/val/images
+# val_ann_file   : your/val/annotations.json
+# YOLO format:
+# train_yaml     : your/data.yaml
+
+model    : configs/model/yolov11n.yaml
+epochs   : 50              # fine-tuning needs fewer epochs than scratch
+batch    : 8
+imgsz    : 640
+workers  : 4
+save_dir : runs/finetune
+
+# ── Differential learning rates ───────────────────────────
+use_differential_lr : true
+lr_backbone         : 0.0001   # backbone — very low, features are good
+lr_neck             : 0.0001   # neck — very low
+lr_head_box         : 0.001    # cv2 box branch — moderate
+lr_head_cls_ft      : 0.001    # cv3 intermediate — moderate
+lr_head_cls_new     : 0.01     # cv3 final Conv2d — high (random init)
+
+# ── Fallback: single LR (used if use_differential_lr=false) ──
+lr0  : 0.001
+lrf  : 0.1              # higher lrf for fine-tuning (less decay needed)
+
+# ── Optimizer ─────────────────────────────────────────────
+optimizer      : AdamW
+momentum       : 0.937
+weight_decay   : 0.0005
+warmup_epochs  : 2.0     # shorter warmup
+warmup_momentum: 0.8
+warmup_bias_lr : 0.1
+nbs            : 64
+
+# ── Backbone freezing ─────────────────────────────────────
+freeze_backbone        : true   # freeze backbone for first N epochs
+freeze_backbone_epochs : 5      # unfreeze after epoch 5
+
+# ── Loss weights ──────────────────────────────────────────
+box : 7.5
+cls : 0.5
+dfl : 1.5
+
+# ── Augmentation — lighter for fine-tuning ────────────────
+mosaic       : 0.5      # reduced (pretrained features don't need as much)
+close_mosaic : 10
+mixup        : 0.0
+cutmix       : 0.0
+copy_paste   : 0.0
+degrees      : 0.0
+translate    : 0.1
+scale        : 0.5
+shear        : 0.0
+perspective  : 0.0
+flipud       : 0.0
+fliplr       : 0.5
+hsv_h        : 0.015
+hsv_s        : 0.7
+hsv_v        : 0.4
+
+# ── Validation ────────────────────────────────────────────
+conf         : 0.001
+iou          : 0.7
+max_det      : 300
+patience     : 20       # shorter patience for fine-tuning
+amp          : true
+device       : ''
