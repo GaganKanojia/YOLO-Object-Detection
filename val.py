@@ -65,7 +65,18 @@ def main():
     iou     = cfg.get("iou", args.iou)
     max_det = cfg.get("max_det", args.max_det)
 
-    model = load_model(model_path, weights=args.weights, device=str(device))
+    # Resolve the number of classes so the detection head is built at the right
+    # width before loading the checkpoint. Without this the model defaults to
+    # nc=80 and loading a fine-tuned (e.g. nc=3) checkpoint fails with a cls-head
+    # size mismatch. Prefer the config's nc, else derive it from the val data.yaml.
+    nc = cfg.get("nc")
+    if nc is None:
+        _val_yaml = cfg.get("val_yaml") or args.val_yaml or cfg.get("train_yaml")
+        if _val_yaml:
+            from data.dataset import parse_yolo_yaml
+            nc = parse_yolo_yaml(_val_yaml)["nc"]
+
+    model = load_model(model_path, weights=args.weights, nc=nc, device=str(device))
     model.eval()
 
     # Pick dataset format: --config keys first, then explicit flags.

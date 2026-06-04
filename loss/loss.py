@@ -79,7 +79,9 @@ class DetectionLoss(nn.Module):
         device = next(model.parameters()).device
 
         self.nc = model.nc
-        self.reg_max = 16
+        # Read reg_max from the Detect head (matches Ultralytics' `m = model.model[-1]`)
+        # instead of hardcoding, so a non-default reg_max in the model YAML is honored.
+        self.reg_max = getattr(model.model[-1], "reg_max", 16)
         self.strides = model.stride.to(device)
         self.device = device
 

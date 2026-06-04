@@ -20,6 +20,7 @@ class Validator:
 
     @torch.no_grad()
     def run(self):
+        was_training = self.model.training
         self.model.eval()
         nc = self.model.nc
         metrics = DetectionMetrics(nc=nc, names=self.names)
@@ -41,6 +42,7 @@ class Validator:
                 preds_raw,
                 conf_thres=self.conf,
                 iou_thres=self.iou,
+                multi_label=True,  # match Ultralytics DetectionValidator post-process
                 max_det=self.max_det,
                 nc=nc,
             )
@@ -59,5 +61,5 @@ class Validator:
             metrics.update(preds, targets_xyxy.to(self.device))
 
         results = metrics.compute()
-        self.model.train()
+        self.model.train(was_training)
         return results

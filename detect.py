@@ -41,7 +41,22 @@ def parse_args():
                    help="Directory to write annotated images to (alias: --save)")
     p.add_argument("--hide-labels", action="store_true")
     p.add_argument("--hide-conf", action="store_true")
+    p.add_argument("--nc", type=int, default=None,
+                   help="Number of classes. If omitted, inferred from the checkpoint.")
+    p.add_argument("--data", default=None,
+                   help="Optional data.yaml to read class names (and nc) from.")
     return p.parse_args()
+
+
+def _infer_nc_from_ckpt(weights_path, device):
+    """Read the cls-head width from a checkpoint so the model is built at the
+    right number of classes before loading (avoids an nc=80 default mismatch)."""
+    ckpt = torch.load(weights_path, map_location=device, weights_only=False)
+    state = (ckpt.get("ema") or ckpt.get("model") or ckpt) if isinstance(ckpt, dict) else ckpt
+    for k, v in state.items():
+        if k.endswith("cv3.0.2.bias"):  # final classification conv bias → [nc]
+            return int(v.shape[0])
+    return None
 
 
 def preprocess(img_bgr, imgsz):
@@ -69,7 +84,21 @@ def main():
     args = parse_args()
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    model = load_model(args.model, weights=args.weights, device=str(device))
+    # Resolve nc/names before building the head: explicit --nc, else --data yaml,
+    # else infer from the checkpoint's cls-head width.
+    names = None
+    nc = args.nc
+    if args.data:
+        import yaml as _yaml
+        d = _yaml.safe_load(open(args.data))
+        names = {i: n for i, n in enumerate(d["names"])}
+        nc = nc or d.get("nc", len(d["names"]))
+    if nc is None:
+        nc = _infer_nc_from_ckpt(args.weights, str(device))
+
+    model = load_model(args.model, weights=args.weights, nc=nc, device=str(device))
+    if names:
+        model.names = names
     model.eval()
 
     save_dir = Path(args.save_dir)

@@ -236,10 +236,10 @@ class Trainer:
 
             if nb is None:
                 nb = len(train_loader)
-                # Respect warmup_epochs literally — no 100-iter floor.
-                # The old `max(..., 100)` floor pathologically dominated short
-                # smoke runs (e.g. batch=32, nb=4 → 25 epochs of forced warmup).
-                nw = max(round(args.get("warmup_epochs", 3.0) * nb), 1)
+                # Warmup iterations — match Ultralytics exactly: at least 100 iters when
+                # warmup is enabled, and disabled (nw=-1) when warmup_epochs == 0.
+                we = args.get("warmup_epochs", 3.0)
+                nw = max(round(we * nb), 100) if we > 0 else -1
 
             model.train()
             optimizer.zero_grad()
