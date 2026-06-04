@@ -40,11 +40,11 @@ class Detect(nn.Module):
     """YOLOv11 anchor-free detection head."""
     stride = None
 
-    def __init__(self, nc=80, ch=()):
+    def __init__(self, nc=80, ch=(), reg_max=16):
         super().__init__()
         self.nc = nc
         self.nl = len(ch)
-        self.reg_max = 16
+        self.reg_max = reg_max
         self.no = nc + self.reg_max * 4
         self.stride = torch.zeros(self.nl)
 

@@ -42,7 +42,18 @@ def parse_model(cfg: dict, ch_in: int = 3):
     width_mul = cfg["width_multiple"]
     max_ch = cfg["max_channels"]
     nc = cfg["nc"]
+    reg_max = cfg.get("reg_max", 16)
     scale = str(cfg.get("scale", "")).lower()
+
+    def scale_ch(c):
+        # Width-scale output channels, but — like Ultralytics — skip scaling when
+        # the count already equals nc (e.g. a head whose width is the class count).
+        return c if c == nc else make_divisible(min(c, max_ch) * width_mul, 8)
+
+    def maybe_repeat(build, repeats):
+        # Ultralytics wraps a non-repeat base module in nn.Sequential when n>1
+        # (modules that consume `n` internally, like C3k2/C2PSA, are built once).
+        return nn.Sequential(*(build() for _ in range(repeats))) if repeats > 1 else build()
 
     layers = []
     save = []
@@ -69,11 +80,11 @@ def parse_model(cfg: dict, ch_in: int = 3):
 
         # Build module and compute output channels
         if m_cls is Conv:
-            c2 = make_divisible(min(args[0], max_ch) * width_mul, 8)
-            m = m_cls(c1, c2, *args[1:])
+            c2 = scale_ch(args[0])
+            m = maybe_repeat(lambda: m_cls(c1, c2, *args[1:]), n)
 
         elif m_cls is C3k2:
-            c2 = make_divisible(min(args[0], max_ch) * width_mul, 8)
+            c2 = scale_ch(args[0])
             c3k = args[1] if len(args) > 1 else False
             e = args[2] if len(args) > 2 else 0.5
             # Ultralytics forces c3k=True at M/L/X scales (parse_model line 1759)
@@ -82,11 +93,11 @@ def parse_model(cfg: dict, ch_in: int = 3):
             m = m_cls(c1, c2, n, c3k=c3k, e=e)
 
         elif m_cls is SPPF:
-            c2 = make_divisible(min(args[0], max_ch) * width_mul, 8)
-            m = m_cls(c1, c2, *args[1:])
+            c2 = scale_ch(args[0])
+            m = maybe_repeat(lambda: m_cls(c1, c2, *args[1:]), n)
 
         elif m_cls is C2PSA:
-            c2 = make_divisible(min(args[0], max_ch) * width_mul, 8)
+            c2 = scale_ch(args[0])
             m = m_cls(c1, c2, n)
 
         elif m_cls is Concat:
@@ -96,16 +107,17 @@ def parse_model(cfg: dict, ch_in: int = 3):
         elif m_cls is Upsample:
             c2 = c1
             scale_factor = args[1] if len(args) > 1 else 2
-            m = m_cls(size=args[0], scale_factor=scale_factor)
+            mode = args[2] if len(args) > 2 else "nearest"
+            m = m_cls(size=args[0], scale_factor=scale_factor, mode=mode)
 
         elif m_cls is Detect:
             in_chs = tuple(ch_map[x] for x in f)
-            m = m_cls(nc=nc, ch=in_chs)
+            m = m_cls(nc=nc, ch=in_chs, reg_max=reg_max)
             c2 = None
 
         else:
             c2 = c1
-            m = m_cls(*args)
+            m = maybe_repeat(lambda: m_cls(*args), n)
 
         m.i = i
         m.f = f
