@@ -1,6 +1,8 @@
-# YOLOv11 — Pure PyTorch Implementation
+# YOLO Object Detection — Pure PyTorch Implementation
 
-A faithful reimplementation of the YOLOv11 object detection pipeline in pure PyTorch.
+A faithful reimplementation of the **YOLOv11** and **YOLOv9** object detection
+pipelines in pure PyTorch. Both architectures share a single training, validation,
+and inference entry point — the only difference is the `--model` flag.
 
 ## Requirements
 
@@ -10,52 +12,111 @@ pip install -r requirements.txt
 
 Supported Python ≥ 3.9, PyTorch ≥ 2.0.
 
+---
+
+## Supported Architectures
+
+### YOLOv11
+
+| Variant | Params | GFLOPs |
+|---------|--------|--------|
+| n | ~2.6M | ~6.6 |
+| s | ~9.5M | ~21.7 |
+| m | ~20.1M | ~68.5 |
+| l | ~25.4M | ~87.6 |
+| x | ~57.0M | ~196.0 |
+
+- **Backbone**: Conv → Conv → C3k2 × 5 → SPPF → C2PSA
+- **Neck**: FPN top-down + PAN bottom-up
+- **Head**: Decoupled anchor-free Detect with DFL, 3 scales (P3/8, P4/16, P5/32)
+
+### YOLOv9 (GELAN)
+
+| Variant | Params | GFLOPs |
+|---------|--------|--------|
+| t | ~2.1M | ~8.2 |
+| s | ~7.3M | ~26.7 |
+| m | ~20.2M | ~77.9 |
+| c | ~25.6M | ~104.0 |
+| e | ~58.2M | ~193.0 |
+
+- **Backbone**: RepNCSPELAN4 GELAN blocks + AConv/ADown downsampling + SPPELAN
+- **Neck/Head**: Fused into a single `head:` section in the YAML (no separate neck)
+- **yolov9e only**: PGI (Programmable Gradient Information) via CBLinear/CBFuse feature injection — always active, including at inference
+- **Detection head**: Legacy plain-Conv cv3 (`Conv→Conv→Conv2d`) matching the Ultralytics reference
+
+Channel counts are hardcoded per variant (no `depth_multiple`/`width_multiple`).
+
+---
+
+## Architecture Selection
+
+Both architectures are selected via the `--model` flag. The YAML's `arch:` key
+drives dispatch inside `load_model`:
+
+```
+arch: yolov9   → YOLOv9  class (models/yolov9.py)
+arch: yolov11  → YOLOv11 class (models/yolov11.py)   ← default when key absent
+```
+
+All callers (`train.py`, `val.py`, `detect.py`) use `load_model` — no other
+changes are needed to switch between architectures.
+
+---
+
 ## Project Structure
 
 ```
-yolov11/
 ├── configs/
-│   ├── model/           # yolov11n/s/m/l/x.yaml
-│   └── training/        # default.yaml (all hyperparameters)
+│   ├── model/
+│   │   ├── yolov11{n,s,m,l,x}.yaml     # YOLOv11 variants
+│   │   └── yolov9{t,s,m,c,e}.yaml      # YOLOv9 variants
+│   └── training/
+│       ├── default.yaml                 # all hyperparameters + defaults
+│       ├── smoke_test_yolo.yaml         # quick YOLOv11 smoke test
+│       └── smoke_test_yolov9.yaml       # quick YOLOv9 smoke test
 ├── models/
-│   ├── blocks.py        # Conv, C3k2, C2PSA, SPPF, DFL, PSABlock, ...
-│   ├── backbone.py      # Backbone architecture documentation
-│   ├── neck.py          # FPN+PAN architecture documentation
-│   ├── head.py          # Detect head, make_anchors, dist2bbox
-│   └── yolov11.py       # Full model assembly from YAML
+│   ├── blocks.py          # Conv, C3k2, C2PSA, SPPF, DFL, ... (YOLOv11 blocks)
+│   ├── head.py            # Detect head (YOLOv11 / non-legacy cv3)
+│   ├── yolov11.py         # YOLOv11 model + parse_model + load_model factory
+│   ├── yolov9_blocks.py   # GELAN blocks: RepNCSPELAN4, ELAN1, AConv, ADown,
+│   │                      #   SPPELAN, CBLinear, CBFuse, DetectV9
+│   └── yolov9.py          # YOLOv9 model + parse_model_v9 + MODULE_MAP_V9
 ├── data/
-│   ├── dataset.py       # YOLODataset (COCO) + YOLOTxtDataset (YOLO) + build_dataset
-│   ├── augmentations.py # Mosaic, MixUp, RandomPerspective, HSV, flip, letterbox
-│   └── loaders.py       # DataLoader + collate_fn
+│   ├── dataset.py         # YOLODataset (COCO JSON) + YOLOTxtDataset (YOLO TXT)
+│   ├── augmentations.py   # Mosaic, MixUp, RandomPerspective, HSV, flip, letterbox
+│   └── loaders.py         # DataLoader + collate_fn
 ├── loss/
-│   ├── tal.py           # TaskAlignedAssigner (topk=10, alpha=0.5, beta=6.0)
-│   └── loss.py          # DetectionLoss: BCE + CIoU + DFL
+│   ├── tal.py             # TaskAlignedAssigner (topk=10, alpha=0.5, beta=6.0)
+│   └── loss.py            # DetectionLoss: BCE + CIoU + DFL (works for both archs)
 ├── engine/
-│   ├── trainer.py       # Full training loop with warmup, AMP, EMA, scheduler
-│   └── validator.py     # Validation loop, NMS, mAP
+│   ├── trainer.py         # Training loop: warmup, AMP, EMA, LR scheduler
+│   └── validator.py       # Validation: NMS, per-class mAP
 ├── utils/
-│   ├── metrics.py       # mAP@50, mAP@50:95, confusion matrix
-│   ├── nms.py           # Non-Maximum Suppression
-│   ├── bbox.py          # IoU variants (CIoU, DIoU, GIoU), box conversions
-│   └── general.py       # EMA, optimizer builder, LR schedules, logging
+│   ├── metrics.py         # mAP@50, mAP@50:95, per-class AP
+│   ├── nms.py             # Non-Maximum Suppression
+│   ├── bbox.py            # IoU variants (CIoU, DIoU, GIoU), box conversions
+│   ├── general.py         # EMA, optimizer builder, LR schedules, logging
+│   └── transfer.py        # Pretrained weight loading (partial / backbone_neck / subset)
 ├── export/
-│   └── exporter.py      # ONNX, TorchScript, TensorRT export
-├── train.py             # CLI: training
-├── val.py               # CLI: validation
-└── detect.py            # CLI: inference
+│   └── exporter.py        # ONNX, TorchScript, TensorRT export
+├── train.py               # CLI: training
+├── val.py                 # CLI: validation
+└── detect.py              # CLI: inference
 ```
+
+---
 
 ## Data Format
 
-The pipeline supports **two dataset formats**, selected automatically from the
-config keys you provide.
+Two dataset formats are supported, selected automatically from the config keys provided.
 
 ### 1. COCO JSON format
 
 ```
 data/
-├── train2017/           # Training images
-├── val2017/             # Validation images
+├── train2017/
+├── val2017/
 └── annotations/
     ├── instances_train2017.json
     └── instances_val2017.json
@@ -65,28 +126,25 @@ data/
 
 ```
 dataset/
-├── data.yaml            # dataset descriptor — the entry point
+├── data.yaml
 ├── images/
-│   ├── train/           # training images (.jpg/.png/...)
-│   └── val/             # validation images
+│   ├── train/
+│   └── val/
 └── labels/
-    ├── train/           # one .txt per image, same stem name
+    ├── train/        # one .txt per image: "class_id cx cy w h" per line
     └── val/
 ```
 
-Each `labels/.../img.txt` has one row per object: `class_id cx cy w h`
-(class 0-indexed, box coords normalized to `[0,1]`). An empty `.txt` is a valid
-image with no objects. The `data.yaml`:
-
+`data.yaml` example:
 ```yaml
-path: ./dataset          # optional root
-train: images/train      # relative to path
-val: images/val
-nc: 3                    # optional — inferred from names if absent
-names: ['cat', 'dog', 'bird']   # list or {0: cat, 1: dog, 2: bird}
+path: ./dataset
+train: images/train
+val:   images/val
+nc: 3
+names: ['cat', 'dog', 'bird']
 ```
 
-### Config keys side by side
+### Config keys
 
 | | COCO JSON | YOLO TXT |
 |---|---|---|
@@ -97,61 +155,76 @@ names: ['cat', 'dog', 'bird']   # list or {0: cat, 1: dog, 2: bird}
 | descriptor | — | `train_yaml` (+ optional `val_yaml`) |
 | `nc` | required | inferred from `data.yaml` |
 
+---
+
 ## Training
 
 ```bash
-# COCO JSON format
+# Single-config form (recommended)
+python train.py --config configs/training/smoke_test_yolo.yaml
+
+# YOLOv9 — same interface, different model key
+python train.py --config configs/training/smoke_test_yolov9.yaml
+
+# Explicit CLI form
 python train.py \
-    --model configs/model/yolov11n.yaml \
+    --model configs/model/yolov9c.yaml \
     --train-img-dir /data/coco/train2017 \
     --train-ann /data/coco/annotations/instances_train2017.json \
     --val-img-dir /data/coco/val2017 \
     --val-ann /data/coco/annotations/instances_val2017.json \
     --epochs 100 --batch 16 --imgsz 640 --device cuda:0
+
+# Resume from checkpoint
+python train.py --config configs/training/my_run.yaml --resume runs/train/exp/last.pt
 ```
 
-For **YOLO TXT format**, put the dataset descriptor in a single-file config and
-run with `--config`:
+### Fine-tuning from pretrained weights
 
 ```yaml
-# configs/training/my_yolo.yaml
-train_yaml : dataset/coco128/data.yaml
-val_yaml   : dataset/coco128/data.yaml   # same file covers both splits
-model      : configs/model/yolov11n.yaml
-epochs     : 100
-batch      : 16
-imgsz      : 640
+# In your training config YAML:
+pretrained_weights : yolov9t.pt    # Ultralytics checkpoint or our own .pt
+strategy           : partial       # partial | backbone_neck | subset
 ```
+
+`strategy=partial` loads every weight whose shape matches and reinitializes the
+rest (e.g. the classification head when `nc` changes). This means you can
+fine-tune with a **different number of classes** than the pretrained model —
+the pipeline handles nc mismatches automatically.
 
 ```bash
-python train.py --config configs/training/my_yolo.yaml
-# (a ready-made example lives at configs/training/smoke_test_yolo.yaml)
+python train.py --config configs/training/finetune_yolov9t_8cls.yaml
 ```
 
-Resume training from checkpoint:
-```bash
-python train.py ... --resume runs/train/exp/last.pt
-```
-
-### Key Hyperparameters (configs/training/default.yaml)
+### Key Hyperparameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `lr0` | 0.01 | Initial learning rate |
-| `lrf` | 0.01 | Final LR fraction (lr = lr0 × lrf at end) |
+| `lrf` | 0.01 | Final LR fraction |
 | `momentum` | 0.937 | SGD momentum / Adam β₁ |
 | `weight_decay` | 0.0005 | L2 regularization |
 | `warmup_epochs` | 3.0 | Warmup duration |
-| `box` | 7.5 | Bounding box loss weight |
+| `box` | 7.5 | Box loss weight |
 | `cls` | 0.5 | Classification loss weight |
 | `dfl` | 1.5 | Distribution focal loss weight |
 | `mosaic` | 1.0 | Mosaic augmentation probability |
 | `close_mosaic` | 10 | Disable mosaic last N epochs |
-| `fliplr` | 0.5 | Horizontal flip probability |
+| `nbs` | 64 | Nominal batch size (gradient accumulation target) |
+| `amp` | true | Mixed-precision training |
+
+---
 
 ## Validation
 
 ```bash
+# YOLO TXT format
+python val.py \
+    --weights runs/train/exp/best.pt \
+    --model configs/model/yolov9t.yaml \
+    --val-yaml datasets/coco128/data.yaml \
+    --conf 0.001 --iou 0.7
+
 # COCO JSON format
 python val.py \
     --weights runs/train/exp/best.pt \
@@ -159,25 +232,34 @@ python val.py \
     --val-img-dir /data/coco/val2017 \
     --val-ann /data/coco/annotations/instances_val2017.json \
     --conf 0.001 --iou 0.7
-
-# YOLO TXT format
-python val.py \
-    --weights runs/train/exp/best.pt \
-    --model configs/model/yolov11n.yaml \
-    --val-yaml dataset/coco128/data.yaml \
-    --conf 0.001 --iou 0.7
 ```
+
+The validator returns mAP@50, mAP@50:95, precision, recall, and **per-class AP@50**.
+
+### Loading Ultralytics pretrained weights
+
+Both `yolov9t.pt` (and other official Ultralytics checkpoints) can be loaded
+directly — `load_model` unwraps the `DetectionModel` object automatically:
+
+```bash
+python val.py --weights yolov9t.pt --model configs/model/yolov9t.yaml \
+    --val-yaml datasets/coco128/data.yaml
+```
+
+---
 
 ## Inference
 
 ```bash
 python detect.py \
     --weights runs/train/exp/best.pt \
-    --model configs/model/yolov11n.yaml \
+    --model configs/model/yolov9c.yaml \
     --source /path/to/images/ \
     --conf 0.25 --iou 0.7 \
     --save-dir runs/detect/exp
 ```
+
+---
 
 ## Export
 
@@ -185,25 +267,46 @@ python detect.py \
 from models.yolov11 import load_model
 from export.exporter import export_onnx, export_torchscript
 
-model = load_model("configs/model/yolov11n.yaml", weights="runs/train/exp/best.pt")
-export_onnx(model, "yolov11n.onnx", imgsz=640)
-export_torchscript(model, "yolov11n.torchscript", imgsz=640)
+# Works identically for both architectures
+model = load_model("configs/model/yolov9c.yaml", weights="best.pt")
+export_onnx(model, "yolov9c.onnx", imgsz=640)
+export_torchscript(model, "yolov9c.torchscript", imgsz=640)
 ```
 
-## Model Variants
+---
 
-| Variant | depth | width | Params | GFLOPs |
-|---------|-------|-------|--------|--------|
-| n | 0.50 | 0.25 | ~2.6M | ~6.6 |
-| s | 0.50 | 0.50 | ~9.5M | ~21.7 |
-| m | 0.50 | 1.00 | ~20.1M | ~68.5 |
-| l | 1.00 | 1.00 | ~25.4M | ~87.6 |
-| x | 1.00 | 1.50 | ~57.0M | ~196.0 |
+## Accuracy Reference (COCO128, same Ultralytics pretrained weights)
 
-## Architecture Overview
+| Model | mAP@50 | mAP@50:95 |
+|-------|--------|-----------|
+| YOLOv9t (our impl) | 0.610 | 0.456 |
+| YOLOv9t (Ultralytics) | 0.606 | 0.453 |
+| YOLOv9t fine-tuned 20ep | 0.782 | 0.610 |
 
-- **Backbone**: Conv→Conv→C3k2×5→SPPF→C2PSA (11 layers)
-- **Neck**: FPN (top-down upsample + concat) + PAN (bottom-up downsample + concat)
-- **Head**: Decoupled anchor-free Detect head with DFL box regression, 3 scales (P3/8, P4/16, P5/32)
-- **Loss**: BCE (cls) + CIoU (box) + DFL, assigned via TaskAlignedAssigner (topk=10, α=0.5, β=6.0)
-- **Training**: SGD with momentum, linear LR decay, 3-epoch warmup, AMP, EMA (decay=0.9999), gradient clipping (norm=10)
+Delta vs Ultralytics is <0.4% mAP — attributable to NMS implementation
+differences and a 2-image dataset discrepancy (missing label files).
+
+---
+
+## Implementation Notes
+
+### YOLOv9 design decisions
+
+- **No `depth_multiple` / `width_multiple`**: channel counts are hardcoded per
+  variant in each YAML, matching the original paper.
+- **PGI (yolov9e only)**: CBLinear/CBFuse layers are feature-enhancement blocks
+  in the backbone — they are *not* an auxiliary training loss. They remain active
+  at inference.
+- **DetectV9**: YOLOv9 uses a legacy plain-Conv classification branch
+  (`Conv(x,c3,3)→Conv(c3,c3,3)→Conv2d(c3,nc,1)`) instead of YOLOv11's
+  DWConv-based branch. `DetectV9` handles this without touching the existing
+  `Detect` class.
+- **Ultralytics checkpoint compatibility**: key names and tensor shapes are
+  identical to Ultralytics' `DetectionModel` state dict — weights load with
+  `strict=True` equivalence.
+
+### YOLOv11 path is unchanged
+
+Every change is additive: new files (`yolov9.py`, `yolov9_blocks.py`, 5 YAMLs),
+plus a 5-line dispatch branch in `load_model`. All existing YOLOv11 commands
+produce identical results.

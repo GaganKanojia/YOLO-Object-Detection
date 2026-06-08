@@ -1,0 +1,51 @@
+# YOLOv9t smoke test on COCO128 (128 images, 3 epochs)
+# Goal: confirm loss falls and no runtime errors. Not a convergence test.
+
+train_yaml  : datasets/coco128/data.yaml
+val_yaml    : datasets/coco128/data.yaml
+
+model       : configs/model/yolov9t.yaml
+
+epochs      : 3
+batch       : 8
+imgsz       : 640
+workers     : 2
+save_dir    : runs/smoke_yolov9t
+
+optimizer       : AdamW
+lr0             : 0.001
+lrf             : 0.01
+momentum        : 0.937
+weight_decay    : 0.0005
+warmup_epochs   : 0.5
+warmup_momentum : 0.8
+warmup_bias_lr  : 0.1
+nbs             : 16
+
+box : 7.5
+cls : 0.5
+dfl : 1.5
+
+mosaic       : 1.0
+close_mosaic : 0
+mixup        : 0.0
+cutmix       : 0.0
+copy_paste   : 0.0
+degrees      : 0.0
+translate    : 0.1
+scale        : 0.3
+shear        : 0.0
+perspective  : 0.0
+flipud       : 0.0
+fliplr       : 0.5
+hsv_h        : 0.015
+hsv_s        : 0.7
+hsv_v        : 0.4
+
+conf    : 0.001
+iou     : 0.7
+max_det : 300
+
+patience : 50
+amp      : true
+device   : ''

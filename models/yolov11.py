@@ -192,7 +192,13 @@ class YOLOv11(nn.Module):
 
 
 def load_model(cfg_path: str, weights: str = None, nc: int = None, device="cpu"):
-    model = YOLOv11(cfg_path, nc=nc)
+    with open(cfg_path) as _f:
+        _cfg = yaml.safe_load(_f)
+    if _cfg.get("arch") == "yolov9":
+        from models.yolov9 import YOLOv9
+        model = YOLOv9(cfg_path, nc=nc)
+    else:
+        model = YOLOv11(cfg_path, nc=nc)
     if weights:
         ckpt = torch.load(weights, map_location=device, weights_only=False)
         # Prefer EMA (smoothed) weights for evaluation/inference, then fall back to
@@ -201,5 +207,8 @@ def load_model(cfg_path: str, weights: str = None, nc: int = None, device="cpu")
             state = ckpt.get("ema") or ckpt.get("model") or ckpt
         else:
             state = ckpt
+        # Ultralytics checkpoints store the full model object under "model"; unwrap it.
+        if hasattr(state, "state_dict"):
+            state = state.state_dict()
         model.load_state_dict(state, strict=False)
     return model.to(device)
